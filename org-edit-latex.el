@@ -107,12 +107,35 @@
   :group 'org-edit-latex
   :version "24.4")
 
+(defcustom org-edit-latex-default-frag-master nil
+  "Path to default frag-master.tex file(include filename). Default value is nil.
+If set to non-nil, a default frag-master.tex will be automatically generated
+if the file does not exist, and local frag-master will still be used if exists,
+but will not automatically generate."
+  :type 'string
+  :group 'org-edit-latex
+  :version "24.4")
+
+
 ;; silence byte compiler
 (defvar TeX-auto-update)
 (defvar latex-mode-hook)
 
 (defvar-local org-edit-latex--before-type nil
   "Element type before wrapping.")
+
+(defvar-local org-edit-latex--which-TeX-master
+  (cond
+   ((file-exists-p org-edit-latex-frag-master)
+    org-edit-latex-frag-master)
+   ((file-exists-p org-edit-latex-default-frag-master)
+    org-edit-latex-default-frag-master)
+   (org-edit-latex-frag-master))
+  "Decide which frag-master.tex file to be used.
+First use frag-master.tex in current directory if possible,
+then use `org-edit-latex-default-frag-master' if it exists.
+Fall back to frag-master.tex in current directory at end."
+  )
 
 (defconst org-edit-latex-inline-beg-regexp
   "\\\\(\\|\\$[^$]\\|\\\\\\sw"
@@ -124,6 +147,9 @@
   :lighter " Edit-LaTeX"
   (if org-edit-latex-mode
       (progn
+        ;; if default file does not exist, create it
+        (unless (file-exists-p org-edit-latex-default-frag-master)
+          (org-edit-latex--create-master org-edit-latex-default-frag-master))
         (advice-add #'org-edit-special :around #'org-edit-latex--wrap-maybe)
         (advice-add #'org-edit-src-exit :around #'org-edit-latex--unwrap-maybe)
         (when org-edit-latex-show-hint
@@ -131,7 +157,8 @@
                       (if (featurep 'org-eldoc)
                           #'org-edit-latex-hinter
                         #'org-edit-latex-eldoc-function)))
-        (org-edit-latex-create-master-maybe)
+        (when (eq org-edit-latex--which-TeX-master org-edit-latex-create-master)
+          (org-edit-latex-create-master-maybe))
         (add-hook 'org-src-mode-hook #'org-edit-latex--set-TeX-master))
     (advice-remove #'org-edit-special #'org-edit-latex--wrap-maybe)
     (advice-remove #'org-edit-src-exit #'org-edit-latex--unwrap-maybe)
@@ -142,16 +169,22 @@
                     'ignore)))
     (remove-hook 'org-src-mode-hook #'org-edit-latex--set-TeX-master)))
 
-
+
 ;; TeX-master
 
 (defun org-edit-latex--set-TeX-master ()
   "Set `TeX-master' variable for specific src-edit buffer."
-  (when (and (file-exists-p org-edit-latex-frag-master)
-             (eq major-mode 'latex-mode))
-    (setq TeX-master org-edit-latex-frag-master)
-    (define-key (current-local-map) [remap preview-at-point]
-      'org-edit-latex-preview-at-point)))
+  (let ((texfile org-edit-latex--which-TeX-master))
+    (when (and (eq major-mode 'latex-mode)
+               (file-exists-p texfile))
+      (setq TeX-master texfile)
+      (define-key (current-local-map) [remap preview-at-point]
+        'org-edit-latex-preview-at-point))))
+  ;; (when (and (file-exists-p org-edit-latex-frag-master)
+  ;;            (eq major-mode 'latex-mode))
+  ;;   (setq TeX-master org-edit-latex-frag-master)
+  ;;   (define-key (current-local-map) [remap preview-at-point]
+  ;;     'org-edit-latex-preview-at-point)))
 
 ;;;###autoload
 (defun org-edit-latex-preview-at-point ()
@@ -169,23 +202,22 @@ Its value should be one of the following cases:
 'overwrite:    when master file already exists, overwrite it.
 'ask:          will ask first before creating master file.
 other non-nil: when master doesn't exist, create one.
-nil:           do not create master file.
-"
+nil:           do not create master file."
   (let ((master-exists-p (file-exists-p org-edit-latex-frag-master)))
     (if (and master-exists-p
              (eq org-edit-latex-create-master 'overwrite)
-             (y-or-n-p "This will overwrite existing TeX-master. Are you sure?"))
+             (y-or-n-p "This will overwrite existing TeX-master. Are you sure? "))
         (org-edit-latex--create-master)
       (when (not master-exists-p)
         (cl-case org-edit-latex-create-master
-          ('ask (when (y-or-n-p "There is no TeX-master. Do you want to create one?")
+          ('ask (when (y-or-n-p "There is no TeX-master. Do you want to create one? ")
                   (org-edit-latex--create-master)))
           ('nil nil)
           (t (org-edit-latex--create-master)))))))
 
 (defun org-edit-latex-create-auto-file ()
-  "Force the creation of the AUCTeX auto file for a master
-buffer. Borrowed from auctex. The original function name is
+  "Force the creation of the AUCTeX auto file for a master buffer.
+Borrowed from auctex. The original function name is
 `bib-create-auto-file'"
   (interactive)
   (if (not (require 'latex))
@@ -200,9 +232,9 @@ buffer. Borrowed from auctex. The original function name is
 
     (TeX-auto-write)))
 
-(defun org-edit-latex--create-master ()
-  "Create a TeX-master file. Borrowed from
-`org-create-formula-image'."
+(defun org-edit-latex--create-master (&optional path)
+  "Create a TeX-master file. Borrowed from `org-create-formula-image'.
+If `PATH' is set to non-nil, create TeX-master file at `PATH'."
   (interactive)
   (let ((latex-header
          (or
@@ -211,7 +243,9 @@ buffer. Borrowed from auctex. The original function name is
           (org-latex-make-preamble
            (org-export-get-environment (org-export-get-backend 'latex))
            org-format-latex-header)))
-        (texfile (expand-file-name org-edit-latex-frag-master)))
+        (texfile (if path
+                     (expand-file-name path)
+                   (expand-file-name org-edit-latex-frag-master))))
     (with-temp-file texfile
       (insert latex-header)
       (insert "\n\\begin{document}\n"
@@ -231,7 +265,7 @@ header."
   (let ((org-edit-latex-create-master 'overwrite))
     (org-edit-latex-create-master-maybe)))
 
-
+
 
 (defun org-edit-latex--wrap-latex (ele)
   "Wrap latex fragment in a latex src block."
