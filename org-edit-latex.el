@@ -180,11 +180,6 @@ Fall back to frag-master.tex in current directory at end."
       (setq TeX-master texfile)
       (define-key (current-local-map) [remap preview-at-point]
         'org-edit-latex-preview-at-point))))
-  ;; (when (and (file-exists-p org-edit-latex-frag-master)
-  ;;            (eq major-mode 'latex-mode))
-  ;;   (setq TeX-master org-edit-latex-frag-master)
-  ;;   (define-key (current-local-map) [remap preview-at-point]
-  ;;     'org-edit-latex-preview-at-point)))
 
 ;;;###autoload
 (defun org-edit-latex-preview-at-point ()
@@ -374,7 +369,7 @@ latex-environment."
                        (not (looking-at-p "^#\\+")))))
             (progn
               (org-edit-latex--wrap-latex ele)
-              (let ((org-src-preserve-indentation t))
+              (let ((org-src-preserve-indentation nil))
                 (apply oldfun args)))
           (apply oldfun args)))
     (apply oldfun args)))
